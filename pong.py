@@ -50,8 +50,11 @@ t1 = datetime.now()
 # There are many episodes before updating our parameters, these accumulate
 # in the gradient buffer
 grad_buffer = {k : xp.zeros_like(v) for k,v in model.items() }
-# rmsprop memory
-rmsprop_cache = { k : xp.zeros_like(v) for k,v in model.items() }
+
+# Memory for decaying gradient memory
+dec_grad_mem = { k : xp.zeros_like(v) for k,v in model.items() }
+# Memory for squared decaying gradient memory
+sqdec_grad_mem = { k : xp.zeros_like(v) for k,v in model.items() }
 
 def sigmoid(x):
   return 1.0 / (1.0 + xp.exp(-x)) # sigmoid "squashing" function to interval [0,1]
@@ -99,6 +102,26 @@ def policy_backward(eph, epdlogp):
   dh[eph <= 0] = 0 # backprop relu
   dW1 = xp.dot(dh.T, epx) # derivs wrt W1
   return {'W1':dW1, 'W2':dW2}
+
+def rmsprop(mod):
+  """
+  perform rmsprop parameter update every batch_size episodes
+  RMSprop: divide the gradient by a running average of its recent magnitude
+  see 6e, slide 26 of http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf
+  for other opt, see: http://ruder.io/optimizing-gradient-descent/index.html#rmsprop
+  """
+  for k,v in mod.items():
+    g = grad_buffer[k] # gradient for weight k
+    sqdec_grad_mem[k] = decay_rate * sqdec_grad_mem[k] + (1 - decay_rate) * g**2
+    model[k] += learning_rate * g / (xp.sqrt(sqdec_grad_mem[k]) + 1e-5)
+    grad_buffer[k] = xp.zeros_like(v) # reset batch gradient buffer
+
+def adamopt(mod):
+  """
+  Adam optimizer, based on: https://arxiv.org/pdf/1412.6980.pdf
+  Like RMSProp, also divide gradient by decaying av of squared gradient, but:
+  modified the gradient, uses exponentially decaying av of past gradient as well
+  """
 
 env = gym.make("Pong-v0")
 observation = env.reset() # start the game
@@ -159,16 +182,8 @@ while True:
     # Gradients are accumulated over many episodes, determined by batch size
     for k in model: grad_buffer[k] += grad[k] # accumulate grad over batch
 
-    # perform rmsprop parameter update every batch_size episodes
-    # RMSprop: divide the gradient by a running average of its recent magnitude
-    # see 6e, slide 26 of http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf
-    # for other opt, see: http://ruder.io/optimizing-gradient-descent/index.html#rmsprop
     if episode_number % batch_size == 0:
-      for k,v in model.items():
-        g = grad_buffer[k] # gradient for weight k
-        rmsprop_cache[k] = decay_rate * rmsprop_cache[k] + (1 - decay_rate) * g**2
-        model[k] += learning_rate * g / (xp.sqrt(rmsprop_cache[k]) + 1e-5)
-        grad_buffer[k] = xp.zeros_like(v) # reset batch gradient buffer
+      rmsprop(model)
 
     # boring book-keeping
     if running_reward is None:
