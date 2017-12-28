@@ -88,6 +88,7 @@ def policy_forward(x):
   return p, h # return probability of taking action 2, and hidden state
 
 def policy_backward(eph, epdlogp):
+
   """
   backward pass. (eph is array of intermediate hidden states)
   Args:
